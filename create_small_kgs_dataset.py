@@ -12,13 +12,23 @@ import argparse
 import shutil
 from huggingface_hub import HfApi, create_repo
 
+
 def parse_args():
-    parser = argparse.ArgumentParser(description="Create and upload the small-kgs dataset to Hugging Face")
-    parser.add_argument("--org-name", default="ladybugdb", help="Hugging Face organization name")
+    parser = argparse.ArgumentParser(
+        description="Create and upload the small-kgs dataset to Hugging Face"
+    )
+    parser.add_argument(
+        "--org-name", default="ladybugdb", help="Hugging Face organization name"
+    )
     parser.add_argument("--dataset-name", default="small-kg", help="Dataset name")
-    parser.add_argument("--lbdb-file", required=True, help="Path to the LBDB file to upload")
-    parser.add_argument("--private", action="store_true", help="Make repository private")
+    parser.add_argument(
+        "--lbdb-file", required=True, help="Path to the LBDB file to upload"
+    )
+    parser.add_argument(
+        "--private", action="store_true", help="Make repository private"
+    )
     return parser.parse_args()
+
 
 def check_huggingface_login():
     """Check if user is logged in to Hugging Face"""
@@ -32,20 +42,17 @@ def check_huggingface_login():
         print("Please run: huggingface-cli login")
         return None
 
+
 def create_dataset_repo(api, repo_id):
     """Create the dataset repository"""
     try:
-        create_repo(
-            repo_id,
-            repo_type="dataset",
-            exist_ok=True,
-            private=False
-        )
+        create_repo(repo_id, repo_type="dataset", exist_ok=True, private=False)
         print(f"✓ Dataset repository created: {repo_id}")
     except Exception as e:
         print(f"✗ Error creating repository: {e}")
         return False
     return True
+
 
 def create_dataset_card(org_name, dataset_name, lbdb_file):
     """Create the dataset README.md with proper configuration"""
@@ -150,6 +157,7 @@ dataset = load_dataset("{org_name}/{dataset_name}", name="lbdb")
 
     return card_content
 
+
 def prepare_data_files(lbdb_file):
     """Prepare data files for each version"""
 
@@ -168,19 +176,20 @@ def prepare_data_files(lbdb_file):
 
     return data_dir
 
+
 def upload_files(api, data_dir, repo_id, org_name, dataset_name, lbdb_file):
     """Upload files to the repository"""
 
     # Upload dataset card
     card_path = "/tmp/local/small-kgs_README.md"
-    with open(card_path, 'w') as f:
+    with open(card_path, "w") as f:
         f.write(create_dataset_card(org_name, dataset_name, lbdb_file))
 
     api.upload_file(
         path_or_fileobj=card_path,
         path_in_repo="README.md",
         repo_id=repo_id,
-        repo_type="dataset"
+        repo_type="dataset",
     )
     print("✓ Uploaded dataset card")
 
@@ -192,9 +201,10 @@ def upload_files(api, data_dir, repo_id, org_name, dataset_name, lbdb_file):
                 folder_path=version_dir,
                 repo_id=repo_id,
                 repo_type="dataset",
-                commit_message=f"Add {version} version"
+                commit_message=f"Add {version} version",
             )
             print(f"✓ Uploaded {version} version")
+
 
 def main():
     args = parse_args()
@@ -224,6 +234,7 @@ def main():
     print(f"\n✓ Dataset created successfully!")
     print(f"  Repository: https://huggingface.co/datasets/{repo_id}")
     print(f"  Available versions: graph-std, duckdb, lbdb")
+
 
 if __name__ == "__main__":
     main()

@@ -1,0 +1,18 @@
+[project]
+name = "ladybug-smallkg-scripts"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "duckdb>=0.10.0",
+    "huggingface_hub>=0.20.0",
+    "real_ladybug>=0.13.1",
+]
+
+[project.scripts]
+create-duckdb = "create_duckdb:main"
+create-small-kgs-dataset = "create_small_kgs_dataset:main"
+
+[project.optional-dependencies]
+dev = []

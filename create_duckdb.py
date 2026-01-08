@@ -30,8 +30,7 @@ def export_ladybug_to_parquet(input_db_path: Path) -> tuple:
             "real_ladybug package is not installed. Install with: pip install real_ladybug"
         )
 
-    tmp_dir = tempfile.mkdtemp()
-    tmp_parquet_dir = Path(tmp_dir)
+    tmp_parquet_dir = Path(tempfile.gettempdir()) / "ladybug_export"
 
     db = lb.Database(str(input_db_path))
     conn = lb.Connection(db)
