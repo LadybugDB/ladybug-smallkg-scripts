@@ -8,13 +8,17 @@ Create and upload the small-kgs dataset to Hugging Face with three versions:
 
 import os
 import subprocess
+import argparse
+import shutil
 from huggingface_hub import HfApi, create_repo
 
-# Configuration
-ORG_NAME = "ladybugdb"
-DATASET_NAME = "small-kg"
-REPO_ID = f"{ORG_NAME}/{DATASET_NAME}"
-LBBDB_FILE = "/tmp/local/kg_history.lbdb"
+def parse_args():
+    parser = argparse.ArgumentParser(description="Create and upload the small-kgs dataset to Hugging Face")
+    parser.add_argument("--org-name", default="ladybugdb", help="Hugging Face organization name")
+    parser.add_argument("--dataset-name", default="small-kg", help="Dataset name")
+    parser.add_argument("--lbdb-file", required=True, help="Path to the LBDB file to upload")
+    parser.add_argument("--private", action="store_true", help="Make repository private")
+    return parser.parse_args()
 
 def check_huggingface_login():
     """Check if user is logged in to Hugging Face"""
@@ -28,24 +32,24 @@ def check_huggingface_login():
         print("Please run: huggingface-cli login")
         return None
 
-def create_dataset_repo(api):
+def create_dataset_repo(api, repo_id):
     """Create the dataset repository"""
     try:
         create_repo(
-            REPO_ID, 
-            repo_type="dataset", 
+            repo_id,
+            repo_type="dataset",
             exist_ok=True,
             private=False
         )
-        print(f"✓ Dataset repository created: {REPO_ID}")
+        print(f"✓ Dataset repository created: {repo_id}")
     except Exception as e:
         print(f"✗ Error creating repository: {e}")
         return False
     return True
 
-def create_dataset_card():
+def create_dataset_card(org_name, dataset_name, lbdb_file):
     """Create the dataset README.md with proper configuration"""
-    
+
     card_content = f"""---
 language:
 - en
@@ -124,95 +128,101 @@ LadybugDB format for graph database operations.
 ### Load graph-std version
 ```python
 from datasets import load_dataset
-dataset = load_dataset("{ORG_NAME}/{DATASET_NAME}", name="graph-std")
+dataset = load_dataset("{org_name}/{dataset_name}", name="graph-std")
 ```
 
 ### Load duckdb version
 ```python
 from datasets import load_dataset
-dataset = load_dataset("{ORG_NAME}/{DATASET_NAME}", name="duckdb")
+dataset = load_dataset("{org_name}/{dataset_name}", name="duckdb")
 ```
 
 ### Load lbdb version
 ```python
 from datasets import load_dataset
-dataset = load_dataset("{ORG_NAME}/{DATASET_NAME}", name="lbdb")
+dataset = load_dataset("{org_name}/{dataset_name}", name="lbdb")
 ```
 
 ## Dataset Contents
 
-- **Knowledge Graph**: {os.path.basename(LBBDB_FILE)}
+- **Knowledge Graph**: {os.path.basename(lbdb_file)}
 """
-    
+
     return card_content
 
-def prepare_data_files():
+def prepare_data_files(lbdb_file):
     """Prepare data files for each version"""
-    
+
     data_dir = "/tmp/local/small-kgs-data"
     os.makedirs(data_dir, exist_ok=True)
-    
+
     # Create version directories
     for version in ["graph-std", "duckdb", "lbdb"]:
         version_dir = os.path.join(data_dir, version)
         os.makedirs(version_dir, exist_ok=True)
-    
+
     # Copy lbdb file
     lbdb_dest = os.path.join(data_dir, "lbdb", "kg_history.lbdb")
-    import shutil
-    shutil.copy2(LBBDB_FILE, lbdb_dest)
+    shutil.copy2(lbdb_file, lbdb_dest)
     print(f"✓ Copied lbdb file to {lbdb_dest}")
-    
+
     return data_dir
 
-def upload_files(api, data_dir):
+def upload_files(api, data_dir, repo_id, org_name, dataset_name, lbdb_file):
     """Upload files to the repository"""
-    
+
     # Upload dataset card
     card_path = "/tmp/local/small-kgs_README.md"
     with open(card_path, 'w') as f:
-        f.write(create_dataset_card())
-    
+        f.write(create_dataset_card(org_name, dataset_name, lbdb_file))
+
     api.upload_file(
         path_or_fileobj=card_path,
         path_in_repo="README.md",
-        repo_id=REPO_ID,
+        repo_id=repo_id,
         repo_type="dataset"
     )
     print("✓ Uploaded dataset card")
-    
+
     # Upload each version
     for version in ["lbdb"]:  # Start with lbdb, others will be converted
         version_dir = os.path.join(data_dir, version)
         if os.path.exists(version_dir):
             api.upload_folder(
                 folder_path=version_dir,
-                repo_id=REPO_ID,
+                repo_id=repo_id,
                 repo_type="dataset",
                 commit_message=f"Add {version} version"
             )
             print(f"✓ Uploaded {version} version")
 
 def main():
+    args = parse_args()
+
+    org_name = args.org_name
+    dataset_name = args.dataset_name
+    lbdb_file = args.lbdb_file
+    repo_id = f"{org_name}/{dataset_name}"
+
     print("Creating small-kgs dataset for ladybugdb...")
-    
+
     # Check login
     api = check_huggingface_login()
     if not api:
         return
-    
+
     # Create repository
-    if not create_dataset_repo(api):
+    if not create_dataset_repo(api, repo_id):
         return
-    
+
     # Prepare data files
-    data_dir = prepare_data_files()
-    
+    data_dir = prepare_data_files(lbdb_file)
+
     # Upload files
-    upload_files(api, data_dir)
-    
+    upload_files(api, data_dir, repo_id, org_name, dataset_name, lbdb_file)
+
     print(f"\n✓ Dataset created successfully!")
-    print(f"  Repository: https://huggingface.co/datasets/{REPO_ID}")
+    print(f"  Repository: https://huggingface.co/datasets/{repo_id}")
     print(f"  Available versions: graph-std, duckdb, lbdb")
 
 if __name__ == "__main__":
