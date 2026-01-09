@@ -1,28 +1,45 @@
 #!/usr/bin/env python3
 """
-Create and upload the small-kgs dataset to Hugging Face with three versions:
-- graph-std: Standard graph format
-- duckdb: DuckDB database format
-- lbdb: LadybugDB format
+Create and upload a small-kgs dataset variant to Hugging Face.
+Takes a directory containing 3 variants (graph-std, duckdb, lbdb) and uploads to
+a subdir within the dataset repository.
+
+Usage:
+    python create_small_kgs_dataset.py --input-dir ldbc_history
 """
 
 import os
 import subprocess
 import argparse
 import shutil
-from huggingface_hub import HfApi, create_repo
+from huggingface_hub import HfApi, create_repo, repo_info
 
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Create and upload the small-kgs dataset to Hugging Face"
+        description="Create and upload a small-kgs dataset variant to Hugging Face"
+    )
+    parser.add_argument(
+        "--input-dir",
+        required=True,
+        help="Path to directory containing 3 variants (graph-std, duckdb, lbdb)",
     )
     parser.add_argument(
         "--org-name", default="ladybugdb", help="Hugging Face organization name"
     )
-    parser.add_argument("--dataset-name", default="small-kg", help="Dataset name")
     parser.add_argument(
-        "--lbdb-file", required=True, help="Path to the LBDB file to upload"
+        "--base-dataset-name",
+        default="small-kgs",
+        help="Base dataset name on Hugging Face",
+    )
+    parser.add_argument(
+        "--variant-name",
+        help="Variant name (defaults to input directory name)",
+    )
+    parser.add_argument(
+        "--variant-subdir",
+        default="kg_history",
+        help="Subdir name within the dataset repo (default: kg_history)",
     )
     parser.add_argument(
         "--private", action="store_true", help="Make repository private"
@@ -35,26 +52,87 @@ def check_huggingface_login():
     try:
         api = HfApi()
         whoami = api.whoami()
-        print(f"✓ Logged in as: {whoami['name']}")
+        print(f"Logged in as: {whoami['name']}")
         return api
     except Exception as e:
-        print(f"✗ Not logged in to Hugging Face: {e}")
+        print(f"Not logged in to Hugging Face: {e}")
         print("Please run: huggingface-cli login")
         return None
 
 
-def create_dataset_repo(api, repo_id):
+def get_repo_id(org_name, base_dataset_name):
+    """Get the full repository ID"""
+    return f"{org_name}/{base_dataset_name}"
+
+
+def check_repo_exists(api, repo_id):
+    """Check if repository already exists"""
+    try:
+        info = api.repo_info(repo_id, repo_type="dataset")
+        return True
+    except Exception:
+        return False
+
+
+def create_dataset_repo(api, repo_id, private=False):
     """Create the dataset repository"""
     try:
-        create_repo(repo_id, repo_type="dataset", exist_ok=True, private=False)
-        print(f"✓ Dataset repository created: {repo_id}")
+        create_repo(repo_id, repo_type="dataset", exist_ok=True, private=private)
+        print(f"Dataset repository created: {repo_id}")
     except Exception as e:
-        print(f"✗ Error creating repository: {e}")
+        print(f"Error creating repository: {e}")
         return False
     return True
 
 
-def create_dataset_card(org_name, dataset_name, lbdb_file):
+def prepare_variant_data(input_dir, variant_subdir):
+    """Prepare data by moving variants to the specified subdir"""
+
+    variant_name = os.path.basename(input_dir)
+    temp_dir = f"/tmp/local/small-kgs-{variant_name}"
+    os.makedirs(temp_dir, exist_ok=True)
+
+    target_dir = os.path.join(temp_dir, variant_subdir)
+    os.makedirs(target_dir, exist_ok=True)
+
+    for variant in ["graph-std", "duckdb", "lbdb"]:
+        src_path = os.path.join(input_dir, variant)
+        dst_path = os.path.join(target_dir, variant)
+        if os.path.exists(src_path):
+            shutil.copytree(src_path, dst_path)
+            print(f"Copied {variant} to {dst_path}")
+
+    return temp_dir, variant_name
+
+
+def upload_files(api, temp_dir, repo_id, variant_name, variant_subdir, is_first_upload):
+    """Upload files to the repository"""
+
+    if is_first_upload:
+        card_path = os.path.join(temp_dir, "README.md")
+        with open(card_path, "w") as f:
+            f.write(create_dataset_card(variant_name, variant_subdir))
+
+        api.upload_file(
+            path_or_fileobj=card_path,
+            path_in_repo="README.md",
+            repo_id=repo_id,
+            repo_type="dataset",
+        )
+        print("Uploaded dataset card")
+
+    version_dir = os.path.join(temp_dir, variant_subdir)
+    if os.path.exists(version_dir):
+        api.upload_folder(
+            folder_path=version_dir,
+            repo_id=repo_id,
+            repo_type="dataset",
+            commit_message=f"Add {variant_name} variant in {variant_subdir}/",
+        )
+        print(f"Uploaded {variant_name} variant to {variant_subdir}/")
+
+
+def create_dataset_card(variant_name, variant_subdir):
     """Create the dataset README.md with proper configuration"""
 
     card_content = f"""---
@@ -62,7 +140,7 @@ language:
 - en
 license: mit
 library_name: ladybug
-pretty_name: Small Knowledge Graphs
+pretty_name: Small Knowledge Graphs - {variant_name}
 size_categories:
 - n<1K
 annotations_creators:
@@ -76,11 +154,9 @@ task_ids:
 - node-classification
 - knowledge-graph-completion
 configs:
-- graph-std
-- duckdb
-- lbdb
+- {variant_name}
 dataset_info:
-- config_name: graph-std
+- config_name: {variant_name}
   features:
   - name: edges
     dtype: list
@@ -93,33 +169,15 @@ dataset_info:
     num_examples: 1
   download_size: 0
   dataset_size: 0
-- config_name: duckdb
-  features:
-  - name: database
-    dtype: binary
-  splits:
-  - name: train
-    num_examples: 1
-  download_size: 0
-  dataset_size: 0
-- config_name: lbdb
-  features:
-  - name: database
-    dtype: binary
-  splits:
-  - name: train
-    num_examples: 1
-  download_size: 0
-  dataset_size: 0
 ---
 
-# Small Knowledge Graphs (small-kgs)
+# Small Knowledge Graphs - {variant_name}
 
-A collection of small knowledge graphs in multiple formats for graph ML research and development.
+A knowledge graph variant stored in multiple formats for graph ML research and development.
 
 ## Dataset Structure
 
-This dataset contains knowledge graphs in three formats:
+This dataset contains knowledge graphs in three formats under the `{variant_subdir}/` directory:
 
 ### graph-std
 Standard graph format with edges and nodes as structured data.
@@ -132,108 +190,63 @@ LadybugDB format for graph database operations.
 
 ## Usage
 
-### Load graph-std version
+### Load this variant
 ```python
 from datasets import load_dataset
-dataset = load_dataset("{org_name}/{dataset_name}", name="graph-std")
+dataset = load_dataset("ladybugdb/small-kgs", name="{variant_name}")
 ```
 
-### Load duckdb version
-```python
-from datasets import load_dataset
-dataset = load_dataset("{org_name}/{dataset_name}", name="duckdb")
-```
+## Variant Contents
 
-### Load lbdb version
-```python
-from datasets import load_dataset
-dataset = load_dataset("{org_name}/{dataset_name}", name="lbdb")
-```
-
-## Dataset Contents
-
-- **Knowledge Graph**: {os.path.basename(lbdb_file)}
+- **Variant Name**: {variant_name}
+- **Storage Path**: {variant_subdir}/
 """
 
     return card_content
 
 
-def prepare_data_files(lbdb_file):
-    """Prepare data files for each version"""
-
-    data_dir = "/tmp/local/small-kgs-data"
-    os.makedirs(data_dir, exist_ok=True)
-
-    # Create version directories
-    for version in ["graph-std", "duckdb", "lbdb"]:
-        version_dir = os.path.join(data_dir, version)
-        os.makedirs(version_dir, exist_ok=True)
-
-    # Copy lbdb file
-    lbdb_dest = os.path.join(data_dir, "lbdb", "kg_history.lbdb")
-    shutil.copy2(lbdb_file, lbdb_dest)
-    print(f"✓ Copied lbdb file to {lbdb_dest}")
-
-    return data_dir
-
-
-def upload_files(api, data_dir, repo_id, org_name, dataset_name, lbdb_file):
-    """Upload files to the repository"""
-
-    # Upload dataset card
-    card_path = "/tmp/local/small-kgs_README.md"
-    with open(card_path, "w") as f:
-        f.write(create_dataset_card(org_name, dataset_name, lbdb_file))
-
-    api.upload_file(
-        path_or_fileobj=card_path,
-        path_in_repo="README.md",
-        repo_id=repo_id,
-        repo_type="dataset",
-    )
-    print("✓ Uploaded dataset card")
-
-    # Upload each version
-    for version in ["lbdb"]:  # Start with lbdb, others will be converted
-        version_dir = os.path.join(data_dir, version)
-        if os.path.exists(version_dir):
-            api.upload_folder(
-                folder_path=version_dir,
-                repo_id=repo_id,
-                repo_type="dataset",
-                commit_message=f"Add {version} version",
-            )
-            print(f"✓ Uploaded {version} version")
-
-
 def main():
     args = parse_args()
 
+    input_dir = os.path.abspath(args.input_dir)
+    if not os.path.isdir(input_dir):
+        print(f"Error: {input_dir} is not a valid directory")
+        return
+
     org_name = args.org_name
-    dataset_name = args.dataset_name
-    lbdb_file = args.lbdb_file
-    repo_id = f"{org_name}/{dataset_name}"
+    base_dataset_name = args.base_dataset_name
+    variant_name = args.variant_name or os.path.basename(input_dir)
+    variant_subdir = args.variant_subdir
+    repo_id = get_repo_id(org_name, base_dataset_name)
 
-    print("Creating small-kgs dataset for ladybugdb...")
+    print(f"Creating small-kgs dataset variant: {variant_name}")
+    print(f"Input directory: {input_dir}")
+    print(f"Target repository: {repo_id}")
 
-    # Check login
     api = check_huggingface_login()
     if not api:
         return
 
-    # Create repository
-    if not create_dataset_repo(api, repo_id):
+    repo_exists = check_repo_exists(api, repo_id)
+
+    if not create_dataset_repo(api, repo_id, private=args.private):
         return
 
-    # Prepare data files
-    data_dir = prepare_data_files(lbdb_file)
+    temp_dir, variant_name = prepare_variant_data(input_dir, variant_subdir)
 
-    # Upload files
-    upload_files(api, data_dir, repo_id, org_name, dataset_name, lbdb_file)
+    upload_files(
+        api,
+        temp_dir,
+        repo_id,
+        variant_name,
+        variant_subdir,
+        is_first_upload=not repo_exists,
+    )
 
-    print(f"\n✓ Dataset created successfully!")
+    print(f"\nDataset updated successfully!")
     print(f"  Repository: https://huggingface.co/datasets/{repo_id}")
-    print(f"  Available versions: graph-std, duckdb, lbdb")
+    print(f"  Variant: {variant_name}")
+    print(f"  Path: {variant_subdir}/")
 
 
 if __name__ == "__main__":
