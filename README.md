@@ -10,6 +10,7 @@ uv run create_duckdb.py \
    --input-db ldbc_history/lbdb/ldbc_history.lbdb \
    --output ldbc_history/duckdb/ldbc_history.duckdb
 # duckdb -> csr duckdb -> csr graph-std
+# script is in https://github.com/adsharma/graph-std/
 uv run convert_csr.py \
   --source-db ldbc_history/duckdb/ldbc_history.duckdb \
   --output-db ldbc_history/graph-std.duckdb \
