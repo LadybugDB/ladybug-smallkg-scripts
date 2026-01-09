@@ -9,10 +9,9 @@ Usage:
 """
 
 import os
-import subprocess
 import argparse
 import shutil
-from huggingface_hub import HfApi, create_repo, repo_info
+from huggingface_hub import HfApi, create_repo
 
 
 def parse_args():
@@ -35,11 +34,6 @@ def parse_args():
     parser.add_argument(
         "--variant-name",
         help="Variant name (defaults to input directory name)",
-    )
-    parser.add_argument(
-        "--variant-subdir",
-        default="kg_history",
-        help="Subdir name within the dataset repo (default: kg_history)",
     )
     parser.add_argument(
         "--private", action="store_true", help="Make repository private"
@@ -85,14 +79,14 @@ def create_dataset_repo(api, repo_id, private=False):
     return True
 
 
-def prepare_variant_data(input_dir, variant_subdir):
-    """Prepare data by moving variants to the specified subdir"""
+def prepare_variant_data(input_dir):
+    """Prepare data by moving variants to a subdir named after the input directory"""
 
     variant_name = os.path.basename(input_dir)
     temp_dir = f"/tmp/local/small-kgs-{variant_name}"
     os.makedirs(temp_dir, exist_ok=True)
 
-    target_dir = os.path.join(temp_dir, variant_subdir)
+    target_dir = os.path.join(temp_dir, variant_name)
     os.makedirs(target_dir, exist_ok=True)
 
     for variant in ["graph-std", "duckdb", "lbdb"]:
@@ -105,13 +99,13 @@ def prepare_variant_data(input_dir, variant_subdir):
     return temp_dir, variant_name
 
 
-def upload_files(api, temp_dir, repo_id, variant_name, variant_subdir, is_first_upload):
+def upload_files(api, temp_dir, repo_id, variant_name, is_first_upload):
     """Upload files to the repository"""
 
     if is_first_upload:
         card_path = os.path.join(temp_dir, "README.md")
         with open(card_path, "w") as f:
-            f.write(create_dataset_card(variant_name, variant_subdir))
+            f.write(create_dataset_card(variant_name))
 
         api.upload_file(
             path_or_fileobj=card_path,
@@ -121,18 +115,19 @@ def upload_files(api, temp_dir, repo_id, variant_name, variant_subdir, is_first_
         )
         print("Uploaded dataset card")
 
-    version_dir = os.path.join(temp_dir, variant_subdir)
+    version_dir = os.path.join(temp_dir, variant_name)
     if os.path.exists(version_dir):
         api.upload_folder(
             folder_path=version_dir,
             repo_id=repo_id,
             repo_type="dataset",
-            commit_message=f"Add {variant_name} variant in {variant_subdir}/",
+            path_in_repo=variant_name,
+            commit_message=f"Add {variant_name} variant",
         )
-        print(f"Uploaded {variant_name} variant to {variant_subdir}/")
+        print(f"Uploaded {variant_name} variant")
 
 
-def create_dataset_card(variant_name, variant_subdir):
+def create_dataset_card(variant_name):
     """Create the dataset README.md with proper configuration"""
 
     card_content = f"""---
@@ -177,7 +172,7 @@ A knowledge graph variant stored in multiple formats for graph ML research and d
 
 ## Dataset Structure
 
-This dataset contains knowledge graphs in three formats under the `{variant_subdir}/` directory:
+This dataset contains knowledge graphs in three formats under the `{variant_name}/` directory:
 
 ### graph-std
 Standard graph format with edges and nodes as structured data.
@@ -199,7 +194,7 @@ dataset = load_dataset("ladybugdb/small-kgs", name="{variant_name}")
 ## Variant Contents
 
 - **Variant Name**: {variant_name}
-- **Storage Path**: {variant_subdir}/
+- **Storage Path**: {variant_name}/
 """
 
     return card_content
@@ -216,7 +211,6 @@ def main():
     org_name = args.org_name
     base_dataset_name = args.base_dataset_name
     variant_name = args.variant_name or os.path.basename(input_dir)
-    variant_subdir = args.variant_subdir
     repo_id = get_repo_id(org_name, base_dataset_name)
 
     print(f"Creating small-kgs dataset variant: {variant_name}")
@@ -232,21 +226,20 @@ def main():
     if not create_dataset_repo(api, repo_id, private=args.private):
         return
 
-    temp_dir, variant_name = prepare_variant_data(input_dir, variant_subdir)
+    temp_dir, variant_name = prepare_variant_data(input_dir)
 
     upload_files(
         api,
         temp_dir,
         repo_id,
         variant_name,
-        variant_subdir,
         is_first_upload=not repo_exists,
     )
 
     print(f"\nDataset updated successfully!")
     print(f"  Repository: https://huggingface.co/datasets/{repo_id}")
     print(f"  Variant: {variant_name}")
-    print(f"  Path: {variant_subdir}/")
+    print(f"  Path: {variant_name}/")
 
 
 if __name__ == "__main__":
